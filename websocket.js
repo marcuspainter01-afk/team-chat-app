@@ -35,6 +35,7 @@ export function setupWebSocket(wss) {
 
           case 'join_room':
             if (!userId) return;
+            if (!store.rooms[msg.room]) return;
             currentRoom = msg.room;
             store.activeConnections.set(ws, { userId, username, currentRoom });
             broadcastUserStatus();
@@ -62,7 +63,7 @@ export function setupWebSocket(wss) {
             }
 
             await persistData();
-            broadcast({ type: 'message', ...chatMessage });
+            broadcastToRoom(currentRoom, { type: 'message', ...chatMessage });
             break;
           }
 
@@ -99,6 +100,7 @@ export function setupWebSocket(wss) {
             if (!rm || rm.deleted) return;
             if (!rm.reactions) rm.reactions = {};
             const emoji = msg.emoji;
+            if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > 10) return;
             if (!rm.reactions[emoji]) rm.reactions[emoji] = [];
             const idx = rm.reactions[emoji].indexOf(userId);
             if (idx === -1) {

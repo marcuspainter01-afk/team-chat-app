@@ -301,7 +301,7 @@ function getHTML() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Team Chat</title>
+  <title>Alpine Team Chat</title>
   <style>
     * {
       margin: 0;
@@ -643,7 +643,7 @@ function getHTML() {
 <body>
   <div id="auth-screen" class="auth-container">
     <div class="auth-box">
-      <h1>Team Chat</h1>
+      <h1>Alpine Team Chat</h1>
       <div id="login-form" class="auth-form">
         <input type="text" id="login-username" placeholder="Username" />
         <input type="password" id="login-password" placeholder="Password" />
@@ -669,7 +669,7 @@ function getHTML() {
   <div id="chat-screen" class="container hidden">
     <div class="sidebar scrollable">
       <div class="sidebar-header">
-        <h1>Team Chat</h1>
+        <h1>Alpine Team Chat</h1>
       </div>
       <div class="rooms-list" id="rooms-list"></div>
       <button class="new-room-btn" onclick="promptNewRoom()">+ New Room</button>
@@ -968,5 +968,5 @@ function getHTML() {
 await loadData();
 
 server.listen(PORT, () => {
-  console.log(`Team Chat running on http://localhost:${PORT}`);
+  console.log(`Alpine Team Chat running on http://localhost:${PORT}`);
 });

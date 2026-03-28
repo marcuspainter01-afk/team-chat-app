@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import bcrypt from 'bcrypt';
+import rateLimit from 'express-rate-limit';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,22 +67,40 @@ async function persistData() {
   }
 }
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+const BCRYPT_ROUNDS = 12;
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+async function hashPassword(password) {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+async function verifyPassword(password, hash) {
+  return bcrypt.compare(password, hash);
 }
 
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
+// Rate limiters
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  message: { error: 'Too many attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
+app.use('/api/login', authLimiter);
+app.use('/api/register', authLimiter);
 
 // API Routes
 
 // Register
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body;
 
   if (!username || !password || !email) {
@@ -102,8 +122,9 @@ app.post('/api/register', (req, res) => {
     id: userId,
     username,
     email: email.toLowerCase(),
-    password: hashPassword(password),
+    password: await hashPassword(password),
     token,
+    tokenCreatedAt: Date.now(),
     createdAt: new Date(),
     avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`
   };
@@ -114,7 +135,7 @@ app.post('/api/register', (req, res) => {
 });
 
 // Login
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -123,12 +144,13 @@ app.post('/api/login', (req, res) => {
 
   const user = users[username];
 
-  if (!user || user.password !== hashPassword(password)) {
+  if (!user || !(await verifyPassword(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
   const token = generateToken();
   user.token = token;
+  user.tokenCreatedAt = Date.now();
   persistData();
 
   res.json({ token, userId: user.id, username, avatar: user.avatar });
@@ -140,6 +162,9 @@ app.post('/api/verify', (req, res) => {
 
   for (const [username, user] of Object.entries(users)) {
     if (user.token === token) {
+      if (Date.now() - (user.tokenCreatedAt || 0) > TOKEN_TTL_MS) {
+        return res.status(401).json({ valid: false, reason: 'Token expired' });
+      }
       return res.json({ valid: true, userId: user.id, username, avatar: user.avatar });
     }
   }

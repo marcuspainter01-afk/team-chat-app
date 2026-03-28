@@ -7,16 +7,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: 65536 });
 
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = './data';
+const DATA_DIR = path.join(__dirname, 'data');
+const MAX_MESSAGES_PER_ROOM = 1000;
 
 // Ensure data directory exists
 await fs.mkdir(DATA_DIR, { recursive: true });
@@ -26,6 +28,9 @@ let users = {};
 let messages = [];
 let rooms = { general: { name: 'general', createdAt: new Date() } };
 const activeConnections = new Map();
+
+// O(1) token → username index (rebuilt on load, updated on login/register)
+const tokenIndex = new Map();
 
 // Load persisted data on startup
 async function loadData() {
@@ -42,6 +47,12 @@ async function loadData() {
     }
     if (await fileExists(roomsFile)) {
       rooms = JSON.parse(await fs.readFile(roomsFile, 'utf-8'));
+    }
+
+    // Rebuild token index from loaded users
+    tokenIndex.clear();
+    for (const [username, user] of Object.entries(users)) {
+      if (user.token) tokenIndex.set(user.token, username);
     }
   } catch (err) {
     console.error('Error loading data:', err);
@@ -91,7 +102,26 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+function lookupToken(token) {
+  const username = tokenIndex.get(token);
+  if (!username) return null;
+  const user = users[username];
+  if (!user) return null;
+  if (Date.now() - (user.tokenCreatedAt || 0) > TOKEN_TTL_MS) return null;
+  return user;
+}
+
+function requireAuth(req, res, next) {
+  const auth = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token || !lookupToken(token)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
 // Middleware
+app.use(helmet());
 app.use(express.json());
 app.use(express.static('public'));
 app.use('/api/login', authLimiter);
@@ -105,6 +135,14 @@ app.post('/api/register', async (req, res) => {
 
   if (!username || !password || !email) {
     return res.status(400).json({ error: 'Username, email, and password required' });
+  }
+
+  if (!/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
+    return res.status(400).json({ error: 'Username must be 3-30 characters, letters, numbers and underscores only' });
+  }
+
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
 
   if (!email.toLowerCase().endsWith('@alpinekansascity.com')) {
@@ -129,7 +167,8 @@ app.post('/api/register', async (req, res) => {
     avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`
   };
 
-  persistData();
+  tokenIndex.set(token, username);
+  await persistData();
 
   res.json({ token, userId, username, avatar: users[username].avatar });
 });
@@ -149,9 +188,11 @@ app.post('/api/login', async (req, res) => {
   }
 
   const token = generateToken();
+  if (user.token) tokenIndex.delete(user.token);
   user.token = token;
   user.tokenCreatedAt = Date.now();
-  persistData();
+  tokenIndex.set(token, username);
+  await persistData();
 
   res.json({ token, userId: user.id, username, avatar: user.avatar });
 });
@@ -159,61 +200,46 @@ app.post('/api/login', async (req, res) => {
 // Verify token
 app.post('/api/verify', (req, res) => {
   const { token } = req.body;
-
-  for (const [username, user] of Object.entries(users)) {
-    if (user.token === token) {
-      if (Date.now() - (user.tokenCreatedAt || 0) > TOKEN_TTL_MS) {
-        return res.status(401).json({ valid: false, reason: 'Token expired' });
-      }
-      return res.json({ valid: true, userId: user.id, username, avatar: user.avatar });
-    }
-  }
-
-  res.status(401).json({ valid: false });
+  const user = lookupToken(token);
+  if (!user) return res.status(401).json({ valid: false });
+  res.json({ valid: true, userId: user.id, username: user.username, avatar: user.avatar });
 });
 
-// Get messages for a room
-app.get('/api/messages/:room', (req, res) => {
+// Get messages for a room (auth required)
+app.get('/api/messages/:room', requireAuth, (req, res) => {
   const { room } = req.params;
   const roomMessages = messages.filter(m => m.room === room);
   res.json(roomMessages);
 });
 
-// Get all rooms
-app.get('/api/rooms', (req, res) => {
+// Get all rooms (auth required)
+app.get('/api/rooms', requireAuth, (req, res) => {
   res.json(Object.values(rooms));
 });
 
 // Create room
-app.post('/api/rooms', (req, res) => {
+app.post('/api/rooms', async (req, res) => {
   const { name, token } = req.body;
 
   if (!name || !token) {
     return res.status(400).json({ error: 'Name and token required' });
   }
 
-  let isAuthed = false;
-  for (const user of Object.values(users)) {
-    if (user.token === token) {
-      isAuthed = true;
-      break;
-    }
+  if (!lookupToken(token)) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  if (!isAuthed) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  if (!/^[a-zA-Z0-9-]{1,30}$/.test(name)) {
+    return res.status(400).json({ error: 'Room name must be 1-30 characters, letters, numbers and hyphens only' });
   }
 
   if (rooms[name]) {
     return res.status(409).json({ error: 'Room already exists' });
   }
 
-  rooms[name] = {
-    name,
-    createdAt: new Date()
-  };
+  rooms[name] = { name, createdAt: new Date() };
 
-  persistData();
+  await persistData();
   broadcastRooms();
 
   res.json(rooms[name]);
@@ -230,28 +256,20 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(data);
 
       switch (msg.type) {
-        case 'auth':
-          // Verify token
-          let found = false;
-          for (const [uname, user] of Object.entries(users)) {
-            if (user.token === msg.token) {
-              userId = user.id;
-              username = uname;
-              found = true;
-              break;
-            }
-          }
-
-          if (!found) {
-            ws.send(JSON.stringify({ type: 'auth_error', error: 'Invalid token' }));
+        case 'auth': {
+          const user = lookupToken(msg.token);
+          if (!user) {
+            ws.send(JSON.stringify({ type: 'auth_error', error: 'Invalid or expired token' }));
             ws.close();
             return;
           }
-
+          userId = user.id;
+          username = user.username;
           activeConnections.set(ws, { userId, username, currentRoom });
           broadcastUserStatus();
           ws.send(JSON.stringify({ type: 'auth_success', userId, username }));
           break;
+        }
 
         case 'join_room':
           if (!userId) return;
@@ -260,7 +278,7 @@ wss.on('connection', (ws) => {
           broadcastUserStatus();
           break;
 
-        case 'message':
+        case 'message': {
           if (!userId) return;
 
           const chatMessage = {
@@ -268,27 +286,29 @@ wss.on('connection', (ws) => {
             userId,
             username,
             room: currentRoom,
-            text: msg.text,
+            text: String(msg.text).slice(0, 2000),
             avatar: users[username]?.avatar,
             timestamp: new Date().toISOString()
           };
 
           messages.push(chatMessage);
-          persistData();
 
-          broadcast({
-            type: 'message',
-            ...chatMessage
-          });
+          // Cap total messages per room to avoid unbounded growth
+          const roomCount = messages.filter(m => m.room === currentRoom).length;
+          if (roomCount > MAX_MESSAGES_PER_ROOM) {
+            messages = messages.filter(m => m.room !== currentRoom)
+              .concat(messages.filter(m => m.room === currentRoom).slice(-MAX_MESSAGES_PER_ROOM));
+          }
+
+          await persistData();
+
+          broadcast({ type: 'message', ...chatMessage });
           break;
+        }
 
         case 'typing':
           if (!userId) return;
-          broadcast({
-            type: 'typing',
-            username,
-            room: currentRoom
-          });
+          broadcastToRoom(currentRoom, { type: 'typing', username, room: currentRoom });
           break;
       }
     } catch (err) {
@@ -303,11 +323,19 @@ wss.on('connection', (ws) => {
 });
 
 function broadcast(msg) {
+  const payload = JSON.stringify(msg);
   wss.clients.forEach(client => {
-    if (client.readyState === 1) { // OPEN
-      client.send(JSON.stringify(msg));
-    }
+    if (client.readyState === 1) client.send(payload);
   });
+}
+
+function broadcastToRoom(room, msg) {
+  const payload = JSON.stringify(msg);
+  for (const [client, info] of activeConnections) {
+    if (info.currentRoom === room && client.readyState === 1) {
+      client.send(payload);
+    }
+  }
 }
 
 function broadcastRooms() {
@@ -741,27 +769,32 @@ function getHTML() {
     let ws = null;
 
     async function init() {
-      if (token) {
-        const res = await fetch('/api/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token })
-        });
+      try {
+        if (token) {
+          const res = await fetch('/api/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+          });
 
-        const data = await res.json();
+          const data = await res.json();
 
-        if (data.valid) {
-          userId = data.userId;
-          username = data.username;
-          showChat();
-          connectWebSocket();
-          loadRooms();
-          loadMessages();
+          if (data.valid) {
+            userId = data.userId;
+            username = data.username;
+            showChat();
+            connectWebSocket();
+            loadRooms();
+            loadMessages();
+          } else {
+            localStorage.removeItem('token');
+            showAuth();
+          }
         } else {
-          localStorage.removeItem('token');
           showAuth();
         }
-      } else {
+      } catch (err) {
+        console.error('Init error:', err);
         showAuth();
       }
     }
@@ -832,8 +865,20 @@ function getHTML() {
         return;
       }
 
+      if (!/^[a-zA-Z0-9_]{3,30}$/.test(u)) {
+        err.textContent = 'Username must be 3-30 characters, letters, numbers and underscores only';
+        err.classList.remove('hidden');
+        return;
+      }
+
       if (!e.toLowerCase().endsWith('@alpinekansascity.com')) {
         err.textContent = 'Must use an @alpinekansascity.com email address';
+        err.classList.remove('hidden');
+        return;
+      }
+
+      if (p.length < 8) {
+        err.textContent = 'Password must be at least 8 characters';
         err.classList.remove('hidden');
         return;
       }
@@ -896,21 +941,21 @@ function getHTML() {
     }
 
     async function loadRooms() {
-      const res = await fetch('/api/rooms');
+      const res = await fetch('/api/rooms', { headers: { 'Authorization': 'Bearer ' + token } });
       const rooms = await res.json();
       renderRooms(rooms);
     }
 
     function renderRooms(rooms) {
       const list = document.getElementById('rooms-list');
-      list.innerHTML = rooms.map(r => \`
-        <div
-          class="room-item \${r.name === currentRoom ? 'active' : ''}"
-          onclick="switchRoom('\${r.name}')"
-        >
-          # \${r.name}
-        </div>
-      \`).join('');
+      list.innerHTML = '';
+      rooms.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'room-item' + (r.name === currentRoom ? ' active' : '');
+        div.textContent = '# ' + r.name;
+        div.addEventListener('click', () => switchRoom(r.name));
+        list.appendChild(div);
+      });
     }
 
     function switchRoom(room) {
@@ -924,7 +969,7 @@ function getHTML() {
     }
 
     async function loadMessages() {
-      const res = await fetch(\`/api/messages/\${currentRoom}\`);
+      const res = await fetch(\`/api/messages/\${currentRoom}\`, { headers: { 'Authorization': 'Bearer ' + token } });
       const msgs = await res.json();
       const container = document.getElementById('messages');
       container.innerHTML = '';
@@ -936,16 +981,35 @@ function getHTML() {
       const container = document.getElementById('messages');
       const div = document.createElement('div');
       div.className = 'message';
-      div.innerHTML = \`
-        <img src="\${msg.avatar}" class="message-avatar" />
-        <div class="message-body">
-          <div class="message-header">
-            <span class="message-author">\${msg.username}</span>
-            <span class="message-time">\${new Date(msg.timestamp).toLocaleTimeString()}</span>
-          </div>
-          <div class="message-text">\${escapeHtml(msg.text)}</div>
-        </div>
-      \`;
+
+      const avatar = document.createElement('img');
+      avatar.src = msg.avatar || '';
+      avatar.className = 'message-avatar';
+
+      const body = document.createElement('div');
+      body.className = 'message-body';
+
+      const header = document.createElement('div');
+      header.className = 'message-header';
+
+      const author = document.createElement('span');
+      author.className = 'message-author';
+      author.textContent = msg.username;
+
+      const time = document.createElement('span');
+      time.className = 'message-time';
+      time.textContent = new Date(msg.timestamp).toLocaleTimeString();
+
+      const text = document.createElement('div');
+      text.className = 'message-text';
+      text.textContent = msg.text;
+
+      header.appendChild(author);
+      header.appendChild(time);
+      body.appendChild(header);
+      body.appendChild(text);
+      div.appendChild(avatar);
+      div.appendChild(body);
       container.appendChild(div);
       container.scrollTop = container.scrollHeight;
     }

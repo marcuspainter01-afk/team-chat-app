@@ -81,10 +81,14 @@ app.use(express.static('public'));
 
 // Register
 app.post('/api/register', (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, email } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password required' });
+  if (!username || !password || !email) {
+    return res.status(400).json({ error: 'Username, email, and password required' });
+  }
+
+  if (!email.toLowerCase().endsWith('@alpinekansascity.com')) {
+    return res.status(403).json({ error: 'Registration is restricted to @alpinekansascity.com email addresses' });
   }
 
   if (users[username]) {
@@ -97,6 +101,7 @@ app.post('/api/register', (req, res) => {
   users[username] = {
     id: userId,
     username,
+    email: email.toLowerCase(),
     password: hashPassword(password),
     token,
     createdAt: new Date(),
@@ -655,6 +660,7 @@ function getHTML() {
       </div>
       <div id="register-form" class="auth-form hidden">
         <input type="text" id="register-username" placeholder="Choose a username" />
+        <input type="email" id="register-email" placeholder="your@alpinekansascity.com" />
         <input type="password" id="register-password" placeholder="Choose a password" />
         <input type="password" id="register-confirm" placeholder="Confirm password" />
         <button onclick="handleRegister()">Create Account</button>
@@ -790,12 +796,19 @@ function getHTML() {
 
     async function handleRegister() {
       const u = document.getElementById('register-username').value;
+      const e = document.getElementById('register-email').value;
       const p = document.getElementById('register-password').value;
       const c = document.getElementById('register-confirm').value;
       const err = document.getElementById('auth-error-reg');
 
-      if (!u || !p || !c) {
+      if (!u || !e || !p || !c) {
         err.textContent = 'All fields required';
+        err.classList.remove('hidden');
+        return;
+      }
+
+      if (!e.toLowerCase().endsWith('@alpinekansascity.com')) {
+        err.textContent = 'Must use an @alpinekansascity.com email address';
         err.classList.remove('hidden');
         return;
       }
@@ -809,7 +822,7 @@ function getHTML() {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: u, password: p })
+        body: JSON.stringify({ username: u, email: e, password: p })
       });
 
       const data = await res.json();

@@ -1,0 +1,19 @@
+{
+  "name": "team-chat-app",
+  "version": "1.0.0",
+  "description": "Real-time team chat application",
+  "main": "team-chat-app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node team-chat-app.js",
+    "dev": "node --watch team-chat-app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

@@ -18,13 +18,17 @@ export function createRouter() {
     if (!/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
       return res.status(400).json({ error: 'Username must be 3-30 characters, letters, numbers and underscores only' });
     }
+    const FORBIDDEN_USERNAMES = new Set(['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty', 'prototype']);
+    if (FORBIDDEN_USERNAMES.has(username)) {
+      return res.status(400).json({ error: 'Username not allowed' });
+    }
     if (password.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
     if (!email.toLowerCase().endsWith('@alpinekansascity.com')) {
       return res.status(403).json({ error: 'Registration is restricted to @alpinekansascity.com email addresses' });
     }
-    if (store.users[username]) {
+    if (Object.hasOwn(store.users, username)) {
       return res.status(409).json({ error: 'User already exists' });
     }
 
@@ -38,7 +42,7 @@ export function createRouter() {
       password: await hashPassword(password),
       token,
       tokenCreatedAt: Date.now(),
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
       avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`,
     };
 
@@ -54,7 +58,7 @@ export function createRouter() {
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password required' });
     }
-    const user = store.users[username];
+    const user = Object.hasOwn(store.users, username) ? store.users[username] : null;
     if (!user || !(await verifyPassword(password, user.password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -70,6 +74,7 @@ export function createRouter() {
   // Verify token
   router.post('/verify', (req, res) => {
     const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token required' });
     const user = lookupToken(token);
     if (!user) return res.status(401).json({ valid: false });
     res.json({ valid: true, userId: user.id, username: user.username, avatar: user.avatar });
@@ -78,6 +83,7 @@ export function createRouter() {
   // Get messages for a room (auth required)
   router.get('/messages/:room', requireAuth, (req, res) => {
     const { room } = req.params;
+    if (!store.rooms[room]) return res.status(404).json({ error: 'Room not found' });
     res.json(store.messages.filter(m => m.room === room));
   });
 
@@ -95,7 +101,7 @@ export function createRouter() {
     }
     if (store.rooms[name]) return res.status(409).json({ error: 'Room already exists' });
 
-    store.rooms[name] = { name, createdAt: new Date() };
+    store.rooms[name] = { name, createdAt: new Date().toISOString() };
     await persistData();
     broadcastRooms();
     res.json(store.rooms[name]);

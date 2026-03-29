@@ -44,9 +44,51 @@ body {
   cursor: pointer;
   transition: background 0.2s;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .room-item:hover { background: #2a2f3a; }
 .room-item.active { background: #4a9eff; font-weight: 600; }
+.room-bell-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  opacity: 0.35;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.room-bell-btn:hover { opacity: 0.7; }
+.room-bell-btn.active { opacity: 1; }
+
+/* iOS install banner */
+.ios-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1a1d26;
+  color: white;
+  padding: 14px 16px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 999;
+  border-top: 1px solid #2a2f3a;
+}
+.ios-banner span { flex: 1; }
+.ios-banner-close {
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0 4px;
+}
+.ios-banner-close:hover { color: white; }
 .new-room-btn {
   margin: 10px;
   padding: 10px;

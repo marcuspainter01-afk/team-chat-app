@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alpine Team Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Auth Screen -->
+  <div id="auth-screen" class="auth-container">
+    <div class="auth-box">
+      <h1>Alpine Team Chat</h1>
+      <div id="login-form" class="auth-form">
+        <input type="text" id="login-username" placeholder="Username" />
+        <input type="password" id="login-password" placeholder="Password" />
+        <button id="login-btn">Sign In</button>
+        <div class="auth-toggle">
+          Don't have an account? <a id="toggle-to-register">Sign Up</a>
+        </div>
+        <div id="auth-error" class="error hidden"></div>
+      </div>
+      <div id="register-form" class="auth-form hidden">
+        <input type="text" id="register-username" placeholder="Choose a username" />
+        <input type="email" id="register-email" placeholder="your@alpinekansascity.com" />
+        <input type="password" id="register-password" placeholder="Choose a password" />
+        <input type="password" id="register-confirm" placeholder="Confirm password" />
+        <button id="register-btn">Create Account</button>
+        <div class="auth-toggle">
+          Already have an account? <a id="toggle-to-login">Sign In</a>
+        </div>
+        <div id="auth-error-reg" class="error hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Screen -->
+  <div id="chat-screen" class="container hidden">
+    <div class="sidebar scrollable">
+      <div class="sidebar-header">
+        <h1>Alpine Team Chat</h1>
+        <button class="search-icon-btn" id="open-search-btn" title="Search">🔍</button>
+      </div>
+      <div class="rooms-list" id="rooms-list"></div>
+      <button class="new-room-btn" id="new-room-btn">+ New Room</button>
+      <div class="sidebar-footer">
+        <img id="user-avatar" class="user-avatar" alt="avatar" />
+        <div class="user-info">
+          <strong id="username-display"></strong>
+          <p>Online</p>
+        </div>
+        <button class="logout-btn" id="logout-btn">✕</button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <!-- Normal chat view -->
+      <div id="chat-view">
+        <div class="chat-header">
+          <h2 id="room-name"></h2>
+        </div>
+        <div class="messages-container scrollable" id="messages"></div>
+        <div class="input-area">
+          <form class="input-form" id="message-form">
+            <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" />
+            <button type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Search view (hidden by default) -->
+      <div id="search-view" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+        <div class="search-bar-wrapper">
+          <input type="text" id="search-input" placeholder="Search messages..." />
+          <button class="search-close-btn" id="close-search-btn">✕</button>
+        </div>
+        <div class="search-results scrollable" id="search-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

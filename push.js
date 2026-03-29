@@ -5,7 +5,10 @@ import { store, persistData } from './data.js';
 export function initVapid() {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const contact = process.env.VAPID_CONTACT_EMAIL || 'mailto:admin@alpinekansascity.com';
+  const contact = process.env.VAPID_CONTACT_EMAIL;
+  if (!contact) {
+    throw new Error('VAPID_CONTACT_EMAIL must be set in environment (e.g. mailto:admin@example.com)');
+  }
   if (!publicKey || !privateKey) {
     throw new Error('VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be set in environment');
   }

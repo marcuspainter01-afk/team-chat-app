@@ -16,6 +16,7 @@ export const store = {
   rooms: { general: { name: 'general', createdAt: new Date() } },
   activeConnections: new Map(), // ws → { userId, username, currentRoom }
   tokenIndex: new Map(),        // token → username
+  pushSubscriptions: {},
 };
 
 async function fileExists(filePath) {
@@ -44,6 +45,11 @@ export async function loadData() {
       store.rooms = JSON.parse(await fs.readFile(roomsFile, 'utf-8'));
     }
 
+    const pushFile = path.join(DATA_DIR, 'push.json');
+    if (await fileExists(pushFile)) {
+      store.pushSubscriptions = JSON.parse(await fs.readFile(pushFile, 'utf-8'));
+    }
+
     // Rebuild token index from loaded users
     store.tokenIndex.clear();
     for (const [username, user] of Object.entries(store.users)) {
@@ -59,6 +65,7 @@ export async function persistData() {
     await fs.writeFile(path.join(DATA_DIR, 'users.json'), JSON.stringify(store.users, null, 2));
     await fs.writeFile(path.join(DATA_DIR, 'messages.json'), JSON.stringify(store.messages, null, 2));
     await fs.writeFile(path.join(DATA_DIR, 'rooms.json'), JSON.stringify(store.rooms, null, 2));
+    await fs.writeFile(path.join(DATA_DIR, 'push.json'), JSON.stringify(store.pushSubscriptions, null, 2));
   } catch (err) {
     console.error('Error persisting data:', err);
     throw err;

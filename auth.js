@@ -29,8 +29,10 @@ export function lookupToken(token) {
 export function requireAuth(req, res, next) {
   const auth = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (!token || !lookupToken(token)) {
+  const user = token ? lookupToken(token) : null;
+  if (!user) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  req.user = user;
   next();
 }

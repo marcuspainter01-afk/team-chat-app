@@ -5,8 +5,8 @@
   "main": "team-chat-app.js",
   "type": "module",
   "scripts": {
-    "start": "node team-chat-app.js",
-    "dev": "node --watch team-chat-app.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

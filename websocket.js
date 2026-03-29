@@ -2,6 +2,7 @@
 import crypto from 'crypto';
 import { store, persistData, MAX_MESSAGES_PER_ROOM } from './data.js';
 import { lookupToken } from './auth.js';
+import { sendRoomPush } from './push.js';
 
 let _wss = null;
 
@@ -64,6 +65,7 @@ export function setupWebSocket(wss) {
 
             await persistData();
             broadcastToRoom(currentRoom, { type: 'message', ...chatMessage });
+            sendRoomPush(currentRoom);
             break;
           }
 

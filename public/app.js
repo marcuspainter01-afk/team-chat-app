@@ -9,6 +9,7 @@ let ws = null;
 let activeEmojiPicker = null; // track open picker to close on outside click
 let pushSubscription = null;
 let subscribedRooms = new Set(JSON.parse(localStorage.getItem('push-rooms') || '[]'));
+let pushInitialized = false;
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -527,6 +528,8 @@ function urlBase64ToUint8Array(base64String) {
 
 async function initPush() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (pushInitialized) return;
+  pushInitialized = true;
 
   // iOS install banner
   const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -588,6 +591,7 @@ async function toggleRoomBell(room, bellBtn) {
       const keyRes = await fetch('/api/push/vapid-public-key', {
         headers: { Authorization: 'Bearer ' + token }
       });
+      if (!keyRes.ok) throw new Error('VAPID key fetch failed: ' + keyRes.status);
       const { publicKey } = await keyRes.json();
       pushSubscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -605,17 +609,31 @@ async function toggleRoomBell(room, bellBtn) {
       return;
     }
   } else {
-    if (subscribedRooms.has(room)) {
+    const wasSubscribed = subscribedRooms.has(room);
+    if (wasSubscribed) {
       subscribedRooms.delete(room);
     } else {
       subscribedRooms.add(room);
     }
     localStorage.setItem('push-rooms', JSON.stringify([...subscribedRooms]));
-    await fetch('/api/push/rooms', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ endpoint: pushSubscription.endpoint, rooms: [...subscribedRooms] })
-    });
+    try {
+      const res = await fetch('/api/push/rooms', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ endpoint: pushSubscription.endpoint, rooms: [...subscribedRooms] })
+      });
+      if (!res.ok) throw new Error('Room update failed: ' + res.status);
+    } catch (err) {
+      // Revert state on failure
+      if (wasSubscribed) {
+        subscribedRooms.add(room);
+      } else {
+        subscribedRooms.delete(room);
+      }
+      localStorage.setItem('push-rooms', JSON.stringify([...subscribedRooms]));
+      console.warn('Failed to update push rooms:', err);
+      return;
+    }
   }
 
   bellBtn.classList.toggle('active', subscribedRooms.has(room));

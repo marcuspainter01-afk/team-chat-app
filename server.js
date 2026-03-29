@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadData } from './data.js';
+import { initVapid } from './push.js';
 import { createRouter } from './routes.js';
 import { setupWebSocket } from './websocket.js';
 
@@ -36,6 +37,7 @@ app.use('/api', createRouter());
 
 setupWebSocket(wss);
 
+initVapid();
 await loadData();
 
 server.listen(PORT, () => {

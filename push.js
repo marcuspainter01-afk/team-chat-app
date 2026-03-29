@@ -24,8 +24,10 @@ export async function sendRoomPush(room) {
   if (!subs || Object.keys(subs).length === 0) return;
 
   // Build set of currently-connected userIds — skip them (they see messages in real time)
-  const activeUserIds = new Set(
-    Array.from(store.activeConnections.values()).map(c => c.userId)
+  const activeInRoom = new Set(
+    Array.from(store.activeConnections.values())
+      .filter(c => c.currentRoom === room)
+      .map(c => c.userId)
   );
 
   const payload = JSON.stringify({
@@ -39,7 +41,7 @@ export async function sendRoomPush(room) {
   const expiredEndpoints = [];
 
   for (const [userId, subscriptions] of Object.entries(subs)) {
-    if (activeUserIds.has(userId)) continue;
+    if (activeInRoom.has(userId)) continue;
     for (const sub of subscriptions) {
       if (!sub.rooms.includes(room)) continue;
       try {

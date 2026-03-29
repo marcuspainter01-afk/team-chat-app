@@ -572,6 +572,11 @@ function showIosBanner() {
 }
 
 async function toggleRoomBell(room, bellBtn) {
+  const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (isIos && window.navigator.standalone !== true) {
+    showBellError(bellBtn, "On iPhone, add this app to your Home Screen first, then reopen it to enable notifications");
+    return;
+  }
   if (Notification.permission === 'denied') {
     showBellError(bellBtn, 'Notifications blocked — check your browser settings');
     return;

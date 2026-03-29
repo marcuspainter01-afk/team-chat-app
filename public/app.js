@@ -7,6 +7,8 @@ let username = null;
 let currentRoom = 'general';
 let ws = null;
 let activeEmojiPicker = null; // track open picker to close on outside click
+let pushSubscription = null;
+let subscribedRooms = new Set(JSON.parse(localStorage.getItem('push-rooms') || '[]'));
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ async function init() {
         connectWebSocket();
         loadRooms();
         loadMessages();
+        initPush();
       } else {
         localStorage.removeItem('token');
         showAuth();
@@ -88,6 +91,7 @@ document.getElementById('login-btn').addEventListener('click', async () => {
   connectWebSocket();
   loadRooms();
   loadMessages();
+  initPush();
 });
 
 document.getElementById('register-btn').addEventListener('click', async () => {
@@ -120,6 +124,7 @@ document.getElementById('register-btn').addEventListener('click', async () => {
   connectWebSocket();
   loadRooms();
   loadMessages();
+  initPush();
 });
 
 document.getElementById('logout-btn').addEventListener('click', () => {
@@ -181,7 +186,21 @@ function renderRooms(rooms) {
   rooms.forEach(r => {
     const div = document.createElement('div');
     div.className = 'room-item' + (r.name === currentRoom ? ' active' : '');
-    div.textContent = '# ' + r.name;
+
+    const label = document.createElement('span');
+    label.textContent = '# ' + r.name;
+    div.appendChild(label);
+
+    const bell = document.createElement('button');
+    bell.className = 'room-bell-btn' + (subscribedRooms.has(r.name) ? ' active' : '');
+    bell.textContent = '🔔';
+    bell.title = subscribedRooms.has(r.name) ? 'Mute notifications' : 'Enable notifications';
+    bell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleRoomBell(r.name, bell);
+    });
+    div.appendChild(bell);
+
     div.addEventListener('click', () => switchRoom(r.name));
     list.appendChild(div);
   });
@@ -495,6 +514,125 @@ async function jumpToMessage(room, messageId) {
     el.classList.add('highlight');
     setTimeout(() => el.classList.remove('highlight'), 2000);
   }
+}
+
+// ─── Push Notifications ──────────────────────────────────────────────────────
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function initPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+  // iOS install banner
+  const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true;
+  if (isIos && !isStandalone && !localStorage.getItem('ios-banner-dismissed')) {
+    showIosBanner();
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) pushSubscription = existing;
+
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'navigate_room' && event.data.room) {
+        switchRoom(event.data.room);
+      }
+    });
+  } catch (err) {
+    console.warn('Service worker registration failed:', err);
+  }
+}
+
+function showIosBanner() {
+  const banner = document.createElement('div');
+  banner.className = 'ios-banner';
+  const text = document.createElement('span');
+  text.textContent = "To enable notifications on iOS, tap the Share button and choose 'Add to Home Screen', then reopen the app.";
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'ios-banner-close';
+  closeBtn.title = 'Dismiss';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => {
+    localStorage.setItem('ios-banner-dismissed', '1');
+    banner.remove();
+  });
+  banner.appendChild(text);
+  banner.appendChild(closeBtn);
+  document.body.appendChild(banner);
+}
+
+async function toggleRoomBell(room, bellBtn) {
+  if (Notification.permission === 'denied') {
+    showBellError(bellBtn, 'Notifications blocked — check your browser settings');
+    return;
+  }
+
+  if (Notification.permission === 'default') {
+    const result = await Notification.requestPermission();
+    if (result !== 'granted') {
+      showBellError(bellBtn, 'Notifications blocked — check your browser settings');
+      return;
+    }
+  }
+
+  if (!pushSubscription) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const keyRes = await fetch('/api/push/vapid-public-key', {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const { publicKey } = await keyRes.json();
+      pushSubscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+      subscribedRooms.add(room);
+      localStorage.setItem('push-rooms', JSON.stringify([...subscribedRooms]));
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ subscription: pushSubscription.toJSON(), rooms: [...subscribedRooms] })
+      });
+    } catch (err) {
+      console.warn('Push subscription failed:', err);
+      return;
+    }
+  } else {
+    if (subscribedRooms.has(room)) {
+      subscribedRooms.delete(room);
+    } else {
+      subscribedRooms.add(room);
+    }
+    localStorage.setItem('push-rooms', JSON.stringify([...subscribedRooms]));
+    await fetch('/api/push/rooms', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ endpoint: pushSubscription.endpoint, rooms: [...subscribedRooms] })
+    });
+  }
+
+  bellBtn.classList.toggle('active', subscribedRooms.has(room));
+  bellBtn.title = subscribedRooms.has(room) ? 'Mute notifications' : 'Enable notifications';
+}
+
+function showBellError(bellBtn, msg) {
+  document.querySelectorAll('.bell-error').forEach(el => el.remove());
+  const err = document.createElement('div');
+  err.className = 'bell-error';
+  err.textContent = msg;
+  err.style.cssText = 'position:fixed;background:#fee;color:#c33;border-radius:6px;padding:6px 10px;font-size:12px;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.15)';
+  const rect = bellBtn.getBoundingClientRect();
+  err.style.top = (rect.bottom + 4) + 'px';
+  err.style.left = rect.left + 'px';
+  document.body.appendChild(err);
+  setTimeout(() => err.remove(), 4000);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -133,8 +133,14 @@ export function createRouter() {
     if (!subscription || !subscription.endpoint || !Array.isArray(rooms)) {
       return res.status(400).json({ error: 'subscription and rooms required' });
     }
+    try {
+      const url = new URL(subscription.endpoint);
+      if (url.protocol !== 'https:') throw new Error();
+    } catch {
+      return res.status(400).json({ error: 'Invalid subscription endpoint' });
+    }
     const userId = req.user.id;
-    if (!store.pushSubscriptions[userId]) {
+    if (!Object.hasOwn(store.pushSubscriptions, userId)) {
       store.pushSubscriptions[userId] = [];
     }
     const existing = store.pushSubscriptions[userId].findIndex(

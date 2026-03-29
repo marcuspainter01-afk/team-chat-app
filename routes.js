@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { store, persistData } from './data.js';
 import { hashPassword, verifyPassword, generateToken, lookupToken, requireAuth } from './auth.js';
 import { broadcastRooms } from './websocket.js';
+import { getVapidPublicKey } from './push.js';
 
 export function createRouter() {
   const router = Router();
@@ -119,6 +120,48 @@ export function createRouter() {
       .map(m => ({ room: m.room, messageId: m.id, username: m.username, text: m.text, timestamp: m.timestamp }));
 
     res.json(results);
+  });
+
+  // Get VAPID public key (auth required)
+  router.get('/push/vapid-public-key', requireAuth, (req, res) => {
+    res.json({ publicKey: getVapidPublicKey() });
+  });
+
+  // Subscribe: store push subscription + initial room list (auth required)
+  router.post('/push/subscribe', requireAuth, async (req, res) => {
+    const { subscription, rooms } = req.body;
+    if (!subscription || !subscription.endpoint || !Array.isArray(rooms)) {
+      return res.status(400).json({ error: 'subscription and rooms required' });
+    }
+    const userId = req.user.id;
+    if (!store.pushSubscriptions[userId]) {
+      store.pushSubscriptions[userId] = [];
+    }
+    const existing = store.pushSubscriptions[userId].findIndex(
+      s => s.subscription.endpoint === subscription.endpoint
+    );
+    if (existing !== -1) {
+      store.pushSubscriptions[userId][existing] = { subscription, rooms };
+    } else {
+      store.pushSubscriptions[userId].push({ subscription, rooms });
+    }
+    await persistData();
+    res.status(204).end();
+  });
+
+  // Update rooms for an existing subscription (auth required)
+  router.put('/push/rooms', requireAuth, async (req, res) => {
+    const { endpoint, rooms } = req.body;
+    if (!endpoint || !Array.isArray(rooms)) {
+      return res.status(400).json({ error: 'endpoint and rooms required' });
+    }
+    const userId = req.user.id;
+    const subs = store.pushSubscriptions[userId] || [];
+    const sub = subs.find(s => s.subscription.endpoint === endpoint);
+    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+    sub.rooms = rooms;
+    await persistData();
+    res.status(204).end();
   });
 
   return router;

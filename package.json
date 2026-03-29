@@ -2,7 +2,7 @@
   "name": "team-chat-app",
   "version": "1.0.0",
   "description": "Real-time team chat application",
-  "main": "team-chat-app.js",
+  "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
